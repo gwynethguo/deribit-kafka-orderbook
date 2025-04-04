@@ -1,4 +1,4 @@
-# Deribit Kafka Orderbook
+# Deribit Kafka Order Book
 
 This project connects to the Deribit WebSocket API to subscribe to order book updates for all BTC options available through Deribit, processes the data, and publishes it to a Kafka topic. It also includes a Kafka consumer to validate the integrity of the order book messages.
 
