@@ -1,6 +1,6 @@
 # Deribit Kafka Orderbook
 
-This project connects to the Deribit WebSocket API to subscribe to order book updates for BTC options, processes the data, and publishes it to a Kafka topic. It also includes a Kafka consumer to validate the integrity of the order book messages.
+This project connects to the Deribit WebSocket API to subscribe to order book updates for all BTC options available through Deribit, processes the data, and publishes it to a Kafka topic. It also includes a Kafka consumer to validate the integrity of the order book messages.
 
 ## Table of Contents
 
@@ -104,6 +104,8 @@ This project connects to the Deribit WebSocket API to subscribe to order book up
 
 ## Thought Process
 
+My first approach was to use one WebSocket for each instrument. However, looking at the possibility of having a large number of instruments for BTC/USD options (1000+ instruments), I changed my implementation to use one WebSocket instead. However, having only one connection might make the program slower. Thus, limiting the number of connections and batching the instruments can be used for future improvements.
+
 1. **WebSocket Subscription**  
    The application subscribes to Deribit order book updates in batches of 50 instruments. This ensures efficient subscription without overwhelming the WebSocket connection.
 
@@ -119,6 +121,7 @@ This project connects to the Deribit WebSocket API to subscribe to order book up
 
    - Goroutines are used to handle multiple instruments concurrently.
    - A `sync.WaitGroup` ensures proper synchronization and cleanup of resources.
+   - Channels are used to synchronise between goroutines.
 
 5. **Logging**  
    Logs are written to files for debugging and monitoring purposes. The `.log` files are ignored in version control using the .gitignore file.
@@ -134,7 +137,7 @@ This project connects to the Deribit WebSocket API to subscribe to order book up
    The `PrevChangeId` field in the order book messages is used to detect message loss. If a gap is detected, the application resubscribes to the affected instrument.
 
 3. **Kafka Broker Unavailability**  
-   If the Kafka broker is unavailable, the application logs the error and retries sending messages.
+   If the Kafka broker is unavailable, the application logs the error. Retrying is currently not implemented. However, it will be considered for future improvements.
 
 4. **Invalid API Responses**  
    The application validates API responses and logs any errors. For example, if the Deribit API returns an error code, the application logs the error and exits.
