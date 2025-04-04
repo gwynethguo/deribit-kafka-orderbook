@@ -103,7 +103,7 @@ func (h *InstrumentHandler) handleMessages(ctx context.Context, instrumentCh <-c
 		case deribitMsg := <-instrumentCh:
 			// Check if there's a message lost
 			if (prevChangeId != nil) && (deribitMsg.Params.Data.PrevChangeId != nil) && (*prevChangeId != *deribitMsg.Params.Data.PrevChangeId) {
-				// Reconnect to websocket
+				// Resubscribe to instrument
 				resubscribeCh <- deribitMsg.Params.Data.Instrument
 			}
 
