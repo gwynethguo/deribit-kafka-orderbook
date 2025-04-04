@@ -56,13 +56,7 @@ This project connects to the Deribit WebSocket API to subscribe to order book up
    ```
 
 2. **Create the Topic**  
-   Use the `kafka-topics.sh` script to create a topic. Replace `<topic-name>` with your desired topic name, and adjust the replication factor and partitions as needed:
-
-   ```sh
-   kafka-topics.sh --create --bootstrap-server localhost:9092 --replication-factor 1 --partitions 1 --topic <topic-name>
-   ```
-
-   Example:
+   Use the `kafka-topics.sh` script to create a topic. Replace `<topic-name>` with `deribit_orderbook`, and adjust the replication factor and partitions as needed:
 
    ```sh
    kafka-topics.sh --create --bootstrap-server localhost:9092 --replication-factor 1 --partitions 1 --topic orderbook-updates
@@ -75,7 +69,7 @@ This project connects to the Deribit WebSocket API to subscribe to order book up
    kafka-topics.sh --list --bootstrap-server localhost:9092
    ```
 
-   You should see your topic (`orderbook-updates` in the example above) in the list
+   You should see your topic (`deribit_orderbook` in the example above) in the list
 
    Notes
 
