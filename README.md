@@ -104,7 +104,7 @@ This project connects to the Deribit WebSocket API to subscribe to order book up
 
 ## Thought Process
 
-My first approach was to use one WebSocket for each instrument. However, looking at the possibility of having a large number of instruments for BTC/USD options (1000+ instruments), I changed my implementation to use one WebSocket instead. I also thought that having only one connection might make the program slower. However, I also noticed that the changes for each instrument (different expiry date, price strike, and type) doesn't happen so frequently. Therefore, I think using one WebSocket should be able to produce the order book updates into Kafka in real-time to be used for market making, while also keeping the updates available for backtesting trading strategies.
+My first approach was to use one WebSocket for each instrument. However, looking at the possibility of having a large number of instruments for BTC/USD options (1000+ instruments), I changed my implementation to use one WebSocket instead. I also thought that having only one connection might make the program slower. However, I also noticed that the changes for each instrument (different expiry date, price strike, and type) doesn't happen so frequently. Therefore, using a few WebSockets should be able to produce the order book updates into Kafka in real-time to be used for market making, while also keeping the updates available for backtesting trading strategies.
 
 1. **WebSocket Subscription**  
    The application subscribes to Deribit order book updates in batches of 50 instruments. This ensures efficient subscription without overwhelming the WebSocket connection.
