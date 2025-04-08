@@ -16,6 +16,11 @@ import (
 	"github.com/segmentio/kafka-go"
 )
 
+type InstrumentDetails struct {
+	ch     chan handler.DeribitMessage
+	cancel context.CancelFunc
+}
+
 // handleOrderBookSubscriptions subscribes or unsubscribes from order book channels on the Deribit WebSocket.
 func handleOrderBookSubscriptions(conn *websocket.Conn, instruments []string, isSubscribe bool) handler.SubscribeResponse {
 	// Determine the subscription method (subscribe/unsubscribe)
@@ -86,7 +91,50 @@ func getInstruments() []string {
 	for _, instrument := range response.Result {
 		instruments = append(instruments, instrument.InstrumentName)
 	}
+
 	return instruments
+}
+func handleInstrumentUpdates(ctx context.Context, wg *sync.WaitGroup, prevInstruments []string, updateCh chan<- handler.InstrumentUpdate) {
+	prevInstrumentsMap := make(map[string]struct{})
+	for _, instrument := range prevInstruments {
+		prevInstrumentsMap[instrument] = struct{}{}
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			close(updateCh)
+			return
+		default:
+			response := getInstruments()
+
+			instruments := make(map[string]struct{})
+			for _, instrument := range response {
+				_, ok := prevInstrumentsMap[instrument]
+				if !ok {
+					wg.Add(1)
+					go func() {
+						defer wg.Done()
+						updateCh <- handler.InstrumentUpdate{Instrument: instrument, UpdateType: handler.ADD}
+					}()
+				}
+				instruments[instrument] = struct{}{}
+			}
+
+			for instrument, _ := range prevInstrumentsMap {
+				_, ok := instruments[instrument]
+				if !ok {
+					wg.Add(1)
+					go func() {
+						defer wg.Done()
+						updateCh <- handler.InstrumentUpdate{Instrument: instrument, UpdateType: handler.DELETE}
+					}()
+				}
+			}
+
+			prevInstrumentsMap = instruments
+		}
+	}
 }
 
 func main() {
@@ -108,13 +156,10 @@ func main() {
 	var wg sync.WaitGroup
 
 	// Map to store instrument-specific channels
-	instrumentHandlerMap := make(map[string]chan handler.DeribitMessage)
+	instrumentHandlerMap := make(map[string]InstrumentDetails)
 
-	// Channel for handling resubscription
-	resubscribeCh := make(chan string)
-
-	// Retrieve available instruments
-	instruments := getInstruments()
+	// Channel for handling instrument updates
+	updateCh := make(chan handler.InstrumentUpdate)
 
 	for {
 		select {
@@ -127,27 +172,59 @@ func main() {
 				log.Printf("Failed to connect to Deribit: %v\n", err)
 			}
 
+			// Retrieve available instruments
+			instruments := getInstruments()
+
 			for i, instrument := range instruments {
 				instruments[i] = fmt.Sprintf("book.%s.100ms", instrument)
 			}
 
+			var subscribedInstruments []string
 			// Subscribe to instruments in batches of 50
 			for i := 0; i < len(instruments); i += 50 {
 				batch := instruments[i:min(i+50, len(instruments))]
-				handleOrderBookSubscriptions(conn, batch, true)
+				response := handleOrderBookSubscriptions(conn, batch, true)
+				subscribedInstruments = append(subscribedInstruments, response.Result...)
 			}
+
+			go handleInstrumentUpdates(ctx, &wg, subscribedInstruments, updateCh)
 
 			for {
 				select {
 				case <-ctx.Done():
-					for _, ch := range instrumentHandlerMap {
-						close(ch)
+					for _, instrumentDetails := range instrumentHandlerMap {
+						instrumentDetails.cancel()
+						close(instrumentDetails.ch)
 					}
 					break
-				case instrumentName := <-resubscribeCh:
-					// Unsubscribe and resubscribe for the given instrument
-					handleOrderBookSubscriptions(conn, []string{fmt.Sprintf("book.%s.100ms", instrumentName)}, false)
-					handleOrderBookSubscriptions(conn, []string{fmt.Sprintf("book.%s.100ms", instrumentName)}, true)
+				case instrumentUpdate := <-updateCh:
+					switch instrumentUpdate.UpdateType {
+					case handler.DELETE:
+						instrumentDetails, ok := instrumentHandlerMap[instrumentUpdate.Instrument]
+						handleOrderBookSubscriptions(conn, []string{fmt.Sprintf("book.%s.100ms", instrumentUpdate.Instrument)}, false)
+
+						if !ok {
+							continue
+						}
+						// cancel child context
+						close(instrumentDetails.ch)
+						instrumentDetails.cancel()
+						// remove from map
+						delete(instrumentHandlerMap, instrumentUpdate.Instrument)
+					case handler.ADD:
+						_, ok := instrumentHandlerMap[instrumentUpdate.Instrument]
+						if ok {
+							continue
+						}
+						handleOrderBookSubscriptions(conn, []string{fmt.Sprintf("book.%s.100ms", instrumentUpdate.Instrument)}, true)
+					case handler.RESUBSCRIBE:
+						_, ok := instrumentHandlerMap[instrumentUpdate.Instrument]
+						if !ok {
+							continue
+						}
+						handleOrderBookSubscriptions(conn, []string{fmt.Sprintf("book.%s.100ms", instrumentUpdate.Instrument)}, false)
+						handleOrderBookSubscriptions(conn, []string{fmt.Sprintf("book.%s.100ms", instrumentUpdate.Instrument)}, true)
+					}
 				default:
 					_, msg, err := conn.ReadMessage()
 					if err != nil {
@@ -176,10 +253,11 @@ func main() {
 					if !exists {
 						var instrumentHandler handler.InstrumentHandler
 						instrumentCh := make(chan handler.DeribitMessage)
-						instrumentHandler.Init(ctx, &wg, kafkaWriter, instrumentCh, resubscribeCh)
-						instrumentHandlerMap[deribitMsg.Params.Data.Instrument] = instrumentCh
+						childCtx, childCancel := context.WithCancel(ctx)
+						instrumentHandler.Init(childCtx, &wg, kafkaWriter, instrumentCh, updateCh)
+						instrumentHandlerMap[deribitMsg.Params.Data.Instrument] = InstrumentDetails{ch: instrumentCh, cancel: childCancel}
 					}
-					instrumentCh := instrumentHandlerMap[deribitMsg.Params.Data.Instrument]
+					instrumentCh := instrumentHandlerMap[deribitMsg.Params.Data.Instrument].ch
 					wg.Add(1)
 					go func() {
 						defer wg.Done()

@@ -51,13 +51,26 @@ type InstrumentHandler struct {
 	sendCh chan DeribitMessage
 }
 
-func (h *InstrumentHandler) Init(ctx context.Context, wg *sync.WaitGroup, kafkaWriter *kafka.Writer, instrumentCh <-chan DeribitMessage, resubscribeCh chan<- string) {
+type UpdateType int
+
+const (
+	DELETE UpdateType = iota
+	ADD
+	RESUBSCRIBE
+)
+
+type InstrumentUpdate struct {
+	Instrument string
+	UpdateType UpdateType
+}
+
+func (h *InstrumentHandler) Init(ctx context.Context, wg *sync.WaitGroup, kafkaWriter *kafka.Writer, instrumentCh <-chan DeribitMessage, updateCh chan<- InstrumentUpdate) {
 	h.wg = wg
 	h.sendCh = make(chan DeribitMessage)
 
 	h.wg.Add(2)
 	go h.sendToKafka(ctx, kafkaWriter)
-	go h.handleMessages(ctx, instrumentCh, resubscribeCh)
+	go h.handleMessages(ctx, instrumentCh, updateCh)
 }
 
 func (h *InstrumentHandler) sendToKafka(ctx context.Context, kafkaWriter *kafka.Writer) {
@@ -91,7 +104,7 @@ func (h *InstrumentHandler) sendToKafka(ctx context.Context, kafkaWriter *kafka.
 	}
 }
 
-func (h *InstrumentHandler) handleMessages(ctx context.Context, instrumentCh <-chan DeribitMessage, resubscribeCh chan<- string) {
+func (h *InstrumentHandler) handleMessages(ctx context.Context, instrumentCh <-chan DeribitMessage, resubscribeCh chan<- InstrumentUpdate) {
 	defer h.wg.Done()
 	var prevChangeId *int64
 
@@ -104,7 +117,7 @@ func (h *InstrumentHandler) handleMessages(ctx context.Context, instrumentCh <-c
 			// Check if there's a message lost
 			if (prevChangeId != nil) && (deribitMsg.Params.Data.PrevChangeId != nil) && (*prevChangeId != *deribitMsg.Params.Data.PrevChangeId) {
 				// Resubscribe to instrument
-				resubscribeCh <- deribitMsg.Params.Data.Instrument
+				resubscribeCh <- InstrumentUpdate{Instrument: deribitMsg.Params.Data.Instrument, UpdateType: RESUBSCRIBE}
 			}
 
 			prevChangeId = &deribitMsg.Params.Data.ChangeId
