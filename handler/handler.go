@@ -80,12 +80,13 @@ func (h *InstrumentHandler) sendToKafka(ctx context.Context, kafkaWriter *kafka.
 				Value: dataBytes,
 				Time:  time.Unix(0, deribitMsg.Params.Data.Timestamp*int64(time.Millisecond)),
 			}
-			log.Printf("[KAFKA PRODUCER] KEY: %s, VALUE: %s\n", string(kafkaMessage.Key), string(kafkaMessage.Value))
 
 			// Send to Kafka
 			err = kafkaWriter.WriteMessages(ctx, kafkaMessage)
 			if err != nil {
 				log.Printf("Failed to send to Kafka: %v", err)
+			} else {
+				log.Printf("[KAFKA PRODUCER] KEY: %s, VALUE: %s\n", string(kafkaMessage.Key), string(kafkaMessage.Value))
 			}
 		}
 	}

@@ -113,19 +113,21 @@ func main() {
 	// Channel for handling resubscription
 	resubscribeCh := make(chan string)
 
-	// Retrieve available instruments
-	instruments := getInstruments()
-
+outerLoop:
 	for {
 		select {
 		case <-ctx.Done():
 			wg.Wait()
-			break
+			break outerLoop
 		default:
 			conn, _, err := websocket.DefaultDialer.Dial(constants.DeribitWSURL, nil)
 			if err != nil {
 				log.Printf("Failed to connect to Deribit: %v\n", err)
+				continue
 			}
+
+			// Retrieve available instruments
+			instruments := getInstruments()
 
 			for i, instrument := range instruments {
 				instruments[i] = fmt.Sprintf("book.%s.100ms", instrument)
@@ -137,13 +139,14 @@ func main() {
 				handleOrderBookSubscriptions(conn, batch, true)
 			}
 
+		innerLoop:
 			for {
 				select {
 				case <-ctx.Done():
 					for _, ch := range instrumentHandlerMap {
 						close(ch)
 					}
-					break
+					break innerLoop
 				case instrumentName := <-resubscribeCh:
 					// Unsubscribe and resubscribe for the given instrument
 					handleOrderBookSubscriptions(conn, []string{fmt.Sprintf("book.%s.100ms", instrumentName)}, false)
@@ -152,7 +155,7 @@ func main() {
 					_, msg, err := conn.ReadMessage()
 					if err != nil {
 						log.Printf("Failed to read Websocket message: %v.", err)
-						break
+						break innerLoop
 					}
 
 					var deribitMsg handler.DeribitMessage
